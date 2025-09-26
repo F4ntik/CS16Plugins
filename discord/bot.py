@@ -40,6 +40,7 @@ async def connect_to_cs():
         logging.info("Успешно подключено к CS Server")
     except Exception as e:
         logging.error(f"Ошибка при соединении с CS Server: {e}")
+        raise
 
 # Периодическое задание для обновления статуса
 @tasks.loop(seconds=config.STATUS_INTERVAL)  # Задача будет выполняться каждые 10 секунд

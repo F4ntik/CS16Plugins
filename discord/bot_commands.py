@@ -41,16 +41,17 @@ async def cmd_clear(interaction: discord.Interaction, amount: int = 0):
 @commands.has_permissions(manage_messages=True)  # Проверка прав пользователя
 async def cmd_connect_to_cs(interaction: discord.Interaction):
     if srv.is_connected:
-		    srv.disconnect()
-  
+        srv.disconnect()
+
     # Вызываем функцию подключения к серверу
     try:
         await connect_to_cs()
-        logging.info(f"Подключился к CS Server")
-        await interaction.response.send_message("Успешно подключено к серверу!", ephemeral=True)
     except Exception as e:
         logging.error(f"Ошибка при подключении к CS Server: {e}")
         await interaction.response.send_message('Ошибка при подключении к CS Server. Проверьте логи.', ephemeral=True)
+    else:
+        logging.info("Подключился к CS Server")
+        await interaction.response.send_message("Успешно подключено к серверу!", ephemeral=True)
 
 #-------------------------------------------------------------------
 #-- Команды для регистрации игроков

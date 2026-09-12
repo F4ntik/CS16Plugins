@@ -3,16 +3,16 @@
 
 #pragma semicolon 1
 
-#define VERSION "1.1.0"
+#define VERSION "1.2.0"
 #define PAGE_SIZE 5
 #define MAX_ENTRIES 112
 #define RULE_LIMIT 64
 #define RULE_LINE_LIMIT 256
 #define MENU_NAME "UltraHC_Pika_RU"
 #define MOTD_BYTES 1450
-#define MOTD_BODY_BYTES 950
 
 enum { ACTION_INFO, ACTION_RUN, ACTION_VOTE, ACTION_SET_DAMAGE, ACTION_REMOVE_DAMAGE };
+enum { GROUP_ROOT, GROUP_VOTES, GROUP_STATS, GROUP_ADMIN, GROUP_DAMAGE, GROUP_LETTERS, GROUP_ADS, GROUP_BOTS, GROUP_VOICE, GROUP_COUNT };
 
 enum _:HelpEntry {
     Section,
@@ -21,17 +21,27 @@ enum _:HelpEntry {
     Command[64],
     Owner[64],
     ExtraFlags,
-    Action
+    Action,
+    Group
 };
 
 new g_Entries[MAX_ENTRIES][HelpEntry], g_Count;
-new g_Section[33], g_Page[33][4], g_Visible[33][PAGE_SIZE];
-new bool:g_HelpOpen[33], bool:g_RulesOnly[33], g_HelpPage[33];
+new g_Section[33], g_Page[33][GROUP_COUNT], g_Visible[33][PAGE_SIZE];
 new g_TargetMenu[33], g_TargetUserId[33], g_TargetEntry[33];
 new Float:g_NextOpen[33];
-new const g_Sections[][] = {"Пикабу", "Команды игрока", "Правила", "Команды администратора"};
-new const MOTD_HEAD[] = "<html><head><meta http-equiv=Content-Type content=^"text/html; charset=utf-8^"><style>body{background:#17212b;color:#e5edf5;font:14px Arial;margin:18px}h3{color:#ffc568}pre{font:13px Arial;white-space:pre-wrap;word-wrap:break-word}small{color:#abb9c8}</style></head><body><h3>Пикабу / помощь</h3><pre>";
-new const MOTD_END[] = "</pre><hr><small>!pika — команды. Закройте окно для перелистывания.</small></body></html>";
+new const g_Sections[][] = {"Пикабу", "Голосования", "Статистика CS", "Администратору", "Урон игрока", "Надписи", "Реклама", "Боты", "Личный звук"};
+new const MOTD_HEAD[] = "<html><head><meta http-equiv=Content-Type content=^"text/html;charset=utf-8^"><style>body{background:#15232b;color:#deebef;font:14px Arial;margin:16px}a{color:#8dd8c4}h2{color:#ffc878;font-size:16px;border-bottom:1px solid #38515b}p{line-height:1.4}</style></head><body><a name=t></a><b>ПИКАБУ</b> / справка<br>";
+new const MOTD_BOTS[] = "<h2><a name=b></a>Боты</h2><p><b>!bots</b> — меню ботов. Добавление и сложность: если вы единственный человек на сервере и играете за T/CT.</p>";
+new const MOTD_VOTES[] = "<h2><a name=v></a>Голосования</h2>";
+new const MOTD_MAP[] = "<b>/rtv</b> — за досрочную смену карты.<br>";
+new const MOTD_MODE[] = "<b>/mode</b> — за открытие/закрытие проходов.<br>";
+new const MOTD_DAMAGE[] = "За урон игроку: <b>!pika</b> &gt; Голосования. Нужна регистрация в Discord.<br>";
+new const MOTD_PERSONAL[] = "<h2><a name=p></a>Личное</h2>";
+new const MOTD_STATS[] = "<b>/stats</b> — статистика CS.<br>";
+new const MOTD_MUTE[] = "<b>/mute</b> — отключить голос только для себя.<br>";
+new const MOTD_ADMIN[] = "<h2><a name=a></a>Администратору</h2><b>!pika</b> &gt; Администратору: действия по вашим правам.";
+new const MOTD_END[] = "<p><a href=https://discord.com/invite/r3kCQNxX5Z>Наш Discord</a> &middot; <a href=#t>Наверх</a></p></body></html>";
+new const MOTD_NAV_ADMIN[] = " <a href=#a>Админу</a>";
 
 public plugin_init() {
     register_plugin("UltraHC: Pika menu and help", VERSION, "UltraHC / Codex");
@@ -52,12 +62,11 @@ public plugin_cfg() {
 
 public client_putinserver(id) {
     g_Section[id] = 0;
-    g_HelpOpen[id] = false;
     g_TargetMenu[id] = -1;
     g_TargetUserId[id] = 0;
     g_TargetEntry[id] = -1;
     g_NextOpen[id] = 0.0;
-    for (new i; i < 4; i++) g_Page[id][i] = 0;
+    for (new i; i < GROUP_COUNT; i++) g_Page[id][i] = 0;
 }
 
 public OnSay(id) {
@@ -73,12 +82,7 @@ public OnSay(id) {
     }
     if (!equali(cmd, "!help") && !equali(cmd, "/help")) return PLUGIN_CONTINUE;
     if (!CanOpen(id)) return PLUGIN_HANDLED;
-    trim(argument);
-    if (argument[0] && (!is_str_num(argument) || strlen(argument) > 3)) {
-        client_print(id, print_chat, "[Пикабу] Справка: !help или !help 2 (номер страницы).");
-        return PLUGIN_HANDLED;
-    }
-    ShowHelp(id, max(0, str_to_num(argument) - 1));
+    ShowHelp(id);
     return PLUGIN_HANDLED;
 }
 
@@ -94,20 +98,13 @@ bool:CanOpen(id) {
 public OpenPika(id) {
     if (!CanOpen(id)) return PLUGIN_HANDLED;
     g_Section[id] = 0;
-    g_HelpOpen[id] = false;
     ShowRoot(id);
     return PLUGIN_HANDLED;
 }
 
 public OpenHelp(id) {
     if (!CanOpen(id)) return PLUGIN_HANDLED;
-    new argument[16];
-    read_argv(1, argument, charsmax(argument));
-    if (argument[0] && (!is_str_num(argument) || strlen(argument) > 3)) {
-        client_print(id, print_chat, "[Пикабу] В консоли: ultrahc_help [номер страницы].");
-        return PLUGIN_HANDLED;
-    }
-    ShowHelp(id, max(0, str_to_num(argument) - 1));
+    ShowHelp(id);
     return PLUGIN_HANDLED;
 }
 
@@ -123,27 +120,22 @@ Add(section, const title[], const description[], const command[] = "", const own
 }
 
 LoadFeatures() {
-    Add(1, "Меню и справка", "!pika — доступные действия сервера.^n!help — эта справка, !help 2 — страница 2.^nПосле закрытия MOTD можно листать страницы.^nВ консоли: pika и ultrahc_help.");
     Add(1, "Боты: меню и сложность", "В чате: !bots или /bots^nВ консоли: botmenu^nМеню доступно игрокам.^nДля добавления и сложности выберите T/CT^nи оставайтесь единственным игроком.", "botmenu", "botcontrol.amxx");
     Add(1, "Статистика: меню", "В чате: /stats^nОткрывает меню статистики.", "say /stats", "statsx_rbs.amxx");
     Add(1, "Ваш ранг", "В чате: /rank^nПоказывает ранг игрока.", "say /rank", "statsx_rbs.amxx");
     Add(1, "Общая статистика", "В чате: /rankstats^nПоказывает общую статистику.", "say /rankstats", "statsx_rbs.amxx");
     Add(1, "Статистика за карту", "В чате: /statsme^nВаша статистика за текущую карту.", "say /statsme", "statsx_rbs.amxx");
     Add(1, "Лучшие игроки", "В чате: /top15^nТаблица лучших игроков.", "say /top15", "statsx_rbs.amxx");
-    Add(1, "Рейтинг HLstats", "В чате: /hlxtop^nТаблица лучших игроков HLstats.", "say /hlxtop", "hlstat_top.amxx");
     Add(1, "Лучшие из играющих сейчас", "В чате: /hot^nРейтинг игроков, которые сейчас на сервере.", "say /hot", "statsx_rbs.amxx");
     Add(1, "Здоровье убийцы", "В чате: /hp^nПоказывает здоровье вашего убийцы.", "say /hp", "statsx_rbs.amxx");
     Add(1, "Нанесённый урон", "В чате: /me^nПоказывает нанесённый вами урон.", "say /me", "statsx_rbs.amxx");
     Add(1, "Сообщения статистики", "В чате: /switch^nВключает или выключает сообщения статистики.", "say /switch", "statsx_rbs.amxx");
-    Add(1, "Голосование за карту", "В чате: /rtv^nЗапрос досрочного голосования за карту.", "say /rtv");
-    Add(1, "Открыть или закрыть проходы", "В чате: /mode^nГолосование за открытие или закрытие^nпроходов во вторую половину карты.", "say /mode", "mode.amxx");
+    Add(1, "За досрочную смену карты (RTV)", "/rtv — ваш голос за досрочное^nголосование по выбору карты.", "say /rtv");
+    Add(1, "За открытие / закрытие проходов", "/mode — голосование за открытие^nили закрытие второй половины карты.", "say /mode", "mode.amxx");
     Add(1, "Отключить голос игрока", "В чате: /mute^nОткрывает выбор игрока.^nОтключает его голос только для вас.^nЭто не голосование и не блокировка чата.", "say /mute", "CA_Mute.amxx");
     Add(1, "Discord сервера", "Адрес сообщества из объявлений сервера:^ndiscord.com/invite/r3kCQNxX5Z");
     Add(1, "Встречи сообщества", "Собираемся по пятницам^nв 20:30 по московскому времени.^nИнформация из надписей на de_dust2.");
-    Add(1, "Ограничение урона", "На сервере есть отдельное дополнение^nдля ограничения урона игроков.^nДоступные команды зависят от ваших прав.", "", "uhltrahc_block_damage_2.amxx");
-    Add(1, "Урон: начать голосование", "В консоли:^nuhc_blockdmg_vote ^"Ник игрока^"^nЗапуск и участие — для пользователей,^nчей Steam ID найден в базе Discord.^nБез настройки базы запуск отключён.", "uhc_blockdmg_vote", "uhltrahc_block_damage_2.amxx");
-    Add(1, "Урон: варианты голосования", "Голосование длится 15 секунд.^nВарианты урона: 0, 25, 50, 75, 100%.^nЦель — игрок, не бот.^nОдновременно проводится одно голосование.", "uhc_blockdmg_vote", "uhltrahc_block_damage_2.amxx");
-    Add(1, "Чат сервера", "Обычный чат — клавиша Y.^nКомандный чат — клавиша U.^nСправка доступна в обоих чатах.", "", "ultrahc_chat_manager.amxx");
+    Add(1, "За ограничение урона игроку", "Выберите игрока для голосования.^nЗапуск и участие — после регистрации^nSteam ID в базе Discord.^n15 секунд; исходящий урон 0/25/50/75/100%.", "uhc_blockdmg_vote", "uhltrahc_block_damage_2.amxx");
     Add(3, "Урон: задать долю", "В консоли:^nuhc_blockdmg_set <имя или #userid> <доля>^n0 — блок; 1 — без ограничения админа.^nДоля умножается на результат голосования.", "uhc_blockdmg_set", "uhltrahc_block_damage_2.amxx");
     Add(3, "Урон: снять ограничение", "В консоли:^nuhc_blockdmg_rem <имя или #userid>^nСнимает только ограничение администратора.^nРезультат голосования остаётся в силе.", "uhc_blockdmg_rem", "uhltrahc_block_damage_2.amxx");
     Add(3, "Урон: меню", "В консоли: uhc_blockdmg_menu^nОткрывает выбор игрока и доли урона.", "uhc_blockdmg_menu");
@@ -190,29 +182,12 @@ LoadRules() {
             }
             // Remove old-menu formatting/control characters from configured prose.
             for (new i; line[i]; i++) if (line[i] == '\' || (line[i] > 0 && line[i] < 32)) line[i] = ' ';
-            WrapRule(line);
             formatex(title, charsmax(title), "Правило %d", count + 1);
             Add(2, title, line);
             count++;
         }
         if (physicalLine == RULE_LINE_LIMIT) log_amx("Rules read capped at %d physical lines.", RULE_LINE_LIMIT);
         fclose(file);
-    }
-    if (!count) Add(2, "Правила пока не опубликованы", "Текст правил в справку пока не добавлен.^nУточните действующие правила^nу администрации сервера.");
-}
-
-WrapRule(text[]) {
-    new columns, lastSpace = -1, sinceSpace;
-    for (new i; text[i]; i++) {
-        if ((text[i] & 0xC0) == 0x80) continue;
-        columns++;
-        sinceSpace++;
-        if (text[i] == ' ') { lastSpace = i; sinceSpace = 0; }
-        if (columns >= 38 && lastSpace >= 0) {
-            text[lastSpace] = '^n';
-            columns = sinceSpace;
-            lastSpace = -1;
-        }
     }
 }
 
@@ -268,7 +243,7 @@ ConfigureActions() {
     // Only source-defined, argument-free commands may run directly. Never execute
     // descriptions/rules or dispatch as server console; original plugin gates remain.
     new const direct[][] = {"botmenu", "say /stats", "say /rank", "say /rankstats",
-        "say /statsme", "say /top15", "say /hlxtop", "say /hot", "say /hp", "say /me",
+        "say /statsme", "say /top15", "say /hot", "say /hp", "say /me",
         "say /switch", "say /rtv", "say /mode", "say /mute", "uhc_blockdmg_menu",
         "slmainmenu", "slselect", "sleditmode", "slsave", "delete_ad", "iga_closer",
         "iga_farther", "iga_scale_up", "iga_scale_down"};
@@ -276,9 +251,19 @@ ConfigureActions() {
         for (new i; i < sizeof direct; i++) {
             if (equal(g_Entries[entry][Command], direct[i])) g_Entries[entry][Action] = ACTION_RUN;
         }
-        if (equal(g_Entries[entry][Title], "Урон: начать голосование")) g_Entries[entry][Action] = ACTION_VOTE;
+        if (equal(g_Entries[entry][Command], "uhc_blockdmg_vote")) g_Entries[entry][Action] = ACTION_VOTE;
         if (equal(g_Entries[entry][Command], "uhc_blockdmg_set")) g_Entries[entry][Action] = ACTION_SET_DAMAGE;
         if (equal(g_Entries[entry][Command], "uhc_blockdmg_rem")) g_Entries[entry][Action] = ACTION_REMOVE_DAMAGE;
+        if (equal(g_Entries[entry][Owner], "statsx_rbs.amxx")) g_Entries[entry][Group] = GROUP_STATS;
+        if (equal(g_Entries[entry][Owner], "botcontrol.amxx")) g_Entries[entry][Group] = GROUP_BOTS;
+        if (equal(g_Entries[entry][Owner], "CA_Mute.amxx")) g_Entries[entry][Group] = GROUP_VOICE;
+        if (equal(g_Entries[entry][Command], "say /rtv") || equal(g_Entries[entry][Command], "say /mode")
+            || g_Entries[entry][Action] == ACTION_VOTE) g_Entries[entry][Group] = GROUP_VOTES;
+        if (g_Entries[entry][Section] == 3) {
+            g_Entries[entry][Group] = GROUP_DAMAGE;
+            if (equal(g_Entries[entry][Owner], "SprLett-Editor.amxx")) g_Entries[entry][Group] = GROUP_LETTERS;
+            if (equal(g_Entries[entry][Owner], "in_game_ads.amxx")) g_Entries[entry][Group] = GROUP_ADS;
+        }
     }
 }
 
@@ -290,73 +275,114 @@ bool:HasAdminActions(id) {
 }
 
 ShowRoot(id) {
-    g_HelpOpen[id] = false;
-    g_Section[id] = 0;
-    new menu[512], keys = MENU_KEY_1 | MENU_KEY_2 | MENU_KEY_3 | MENU_KEY_0;
-    new len = formatex(menu, charsmax(menu), "\yПикабу — меню сервера\w^n^n1. Доступные команды^n2. Справка (окно MOTD)^n3. Правила (окно MOTD)^n");
+    g_Section[id] = GROUP_ROOT;
+    new menu[512], keys = MENU_KEY_5 | MENU_KEY_0;
+    new len = formatex(menu, charsmax(menu), "\yПИКАБУ \d/ \wМеню сервера^n^n");
+    if (HasGroup(id, GROUP_BOTS)) { len += formatex(menu[len], charsmax(menu) - len, "\r1. \wБоты: добавить / настроить^n"); keys |= MENU_KEY_1; }
+    if (HasGroup(id, GROUP_VOTES)) { len += formatex(menu[len], charsmax(menu) - len, "\r2. \wГолосования^n"); keys |= MENU_KEY_2; }
+    if (HasGroup(id, GROUP_STATS)) { len += formatex(menu[len], charsmax(menu) - len, "\r3. \wСтатистика CS^n"); keys |= MENU_KEY_3; }
+    if (HasGroup(id, GROUP_VOICE)) { len += formatex(menu[len], charsmax(menu) - len, "\r4. \wОтключить голос для себя^n"); keys |= MENU_KEY_4; }
+    len += formatex(menu[len], charsmax(menu) - len, "^n\r5. \wПомощь^n");
     if (HasAdminActions(id)) {
-        len += formatex(menu[len], charsmax(menu) - len, "4. Команды администратора^n");
-        keys |= MENU_KEY_4;
+        len += formatex(menu[len], charsmax(menu) - len, "\r6. \yАдминистратору^n");
+        keys |= MENU_KEY_6;
     }
-    formatex(menu[len], charsmax(menu) - len, "^n0. Закрыть");
+    formatex(menu[len], charsmax(menu) - len, "^n\r0. \wВыход");
+    show_menu(id, keys, menu, -1, MENU_NAME);
+}
+
+bool:HasGroup(id, group) {
+    for (new i; i < g_Count; i++) {
+        if (g_Entries[i][Group] == group && g_Entries[i][Action] != ACTION_INFO && Available(id, i)) return true;
+    }
+    return false;
+}
+
+RunGroup(id, group) {
+    for (new i; i < g_Count; i++) {
+        if (g_Entries[i][Group] == group && g_Entries[i][Action] != ACTION_INFO && Available(id, i)) { RunAction(id, i); return; }
+    }
+    ShowRoot(id);
+}
+
+ShowAdmin(id) {
+    if (!HasAdminActions(id)) { ShowRoot(id); return; }
+    g_Section[id] = GROUP_ADMIN;
+    new menu[512], keys = MENU_KEY_9 | MENU_KEY_0;
+    new len = formatex(menu, charsmax(menu), "\yПИКАБУ \d/ \wАдминистратору^n^n");
+    for (new group = GROUP_DAMAGE; group <= GROUP_ADS; group++) {
+        if (!HasGroup(id, group)) continue;
+        new key = group - GROUP_DAMAGE;
+        len += formatex(menu[len], charsmax(menu) - len, "\r%d. \w%s^n", key + 1, g_Sections[group]);
+        keys |= 1 << key;
+    }
+    formatex(menu[len], charsmax(menu) - len, "^n\r9. \wВ меню^n\r0. \wВыход");
     show_menu(id, keys, menu, -1, MENU_NAME);
 }
 
 ShowList(id) {
-    g_HelpOpen[id] = false;
     new entries[MAX_ENTRIES], count, section = g_Section[id];
-    if (section != 1 && section != 3) { ShowRoot(id); return; }
+    if (section == GROUP_ADMIN) { ShowAdmin(id); return; }
+    if (section <= GROUP_ROOT || section >= GROUP_BOTS) { ShowRoot(id); return; }
     for (new i; i < g_Count; i++) {
-        if (g_Entries[i][Section] == section && g_Entries[i][Action] != ACTION_INFO && Available(id, i)) entries[count++] = i;
+        if (g_Entries[i][Group] == section && g_Entries[i][Action] != ACTION_INFO && Available(id, i)) entries[count++] = i;
     }
     new pages = max(1, (count + PAGE_SIZE - 1) / PAGE_SIZE);
     g_Page[id][section] = clamp(g_Page[id][section], 0, pages - 1);
     new page = g_Page[id][section], menu[512];
-    new len = formatex(menu, charsmax(menu), "\y%s (%d/%d)\w^n^n", g_Sections[section], page + 1, pages);
-    new keys = MENU_KEY_8 | MENU_KEY_9 | MENU_KEY_0;
+    new len = formatex(menu, charsmax(menu), "\yПИКАБУ \d/ \w%s \d[%d/%d]^n^n", g_Sections[section], page + 1, pages);
+    new keys = MENU_KEY_9 | MENU_KEY_0;
     for (new i; i < PAGE_SIZE; i++) {
         new index = page * PAGE_SIZE + i;
         g_Visible[id][i] = index < count ? entries[index] : -1;
         if (index >= count) continue;
-        len += formatex(menu[len], charsmax(menu) - len, "%d. %s^n", i + 1, g_Entries[entries[index]][Title]);
+        len += formatex(menu[len], charsmax(menu) - len, "\r%d. \w%s^n", i + 1, g_Entries[entries[index]][Title]);
         keys |= (1 << i);
     }
     if (!count) len += formatex(menu[len], charsmax(menu) - len, "Доступных пунктов сейчас нет.^n");
     if (page > 0) {
-        len += formatex(menu[len], charsmax(menu) - len, "^n6. Предыдущая страница");
-        keys |= MENU_KEY_6;
-    }
-    if (page + 1 < pages) {
-        len += formatex(menu[len], charsmax(menu) - len, "^n7. Следующая страница");
+        len += formatex(menu[len], charsmax(menu) - len, "^n\r7. \wНазад");
         keys |= MENU_KEY_7;
     }
-    formatex(menu[len], charsmax(menu) - len, "^n8. В начало^n9. Справка^n0. Закрыть");
+    if (page + 1 < pages) {
+        len += formatex(menu[len], charsmax(menu) - len, "^n\r8. \wДальше");
+        keys |= MENU_KEY_8;
+    }
+    formatex(menu[len], charsmax(menu) - len, "^n\r9. \w%s^n\r0. \wВыход", section >= GROUP_DAMAGE ? "К разделам админа" : "В меню");
     show_menu(id, keys, menu, -1, MENU_NAME);
 }
 
 public OnMenu(id, key) {
     if (!is_user_connected(id)) return PLUGIN_HANDLED;
-    if (key == 9) { g_HelpOpen[id] = false; return PLUGIN_HANDLED; }
-    if (g_HelpOpen[id]) {
-        if (key == 5 || key == 6) ShowHelp(id, g_HelpPage[id] + (key == 5 ? -1 : 1), g_RulesOnly[id]);
-        else if (key == 7) ShowRoot(id);
-        return PLUGIN_HANDLED;
-    }
-    if (!g_Section[id]) {
-        if (key == 0 || (key == 3 && HasAdminActions(id))) {
-            g_Section[id] = key == 0 ? 1 : 3;
+    if (key == 9) return PLUGIN_HANDLED;
+    // A late key from a menu closed by !help cannot execute a stale action.
+    if (g_Section[id] < GROUP_ROOT || g_Section[id] >= GROUP_COUNT) return PLUGIN_HANDLED;
+    if (g_Section[id] == GROUP_ROOT) {
+        if (key == 0) RunGroup(id, GROUP_BOTS);
+        else if (key == 3) RunGroup(id, GROUP_VOICE);
+        else if (key == 1 || key == 2) {
+            g_Section[id] = key == 1 ? GROUP_VOTES : GROUP_STATS;
             ShowList(id);
-        } else if (key == 1 || key == 2) ShowHelp(id, 0, key == 2);
+        } else if (key == 4) ShowHelp(id);
+        else if (key == 5) ShowAdmin(id);
         else ShowRoot(id);
         return PLUGIN_HANDLED;
     }
+    if (g_Section[id] == GROUP_ADMIN) {
+        if (key >= 0 && key <= 2 && HasGroup(id, GROUP_DAMAGE + key)) {
+            g_Section[id] = GROUP_DAMAGE + key;
+            ShowList(id);
+        } else ShowRoot(id);
+        return PLUGIN_HANDLED;
+    }
     if (key >= 0 && key < PAGE_SIZE) RunAction(id, g_Visible[id][key]);
-    else if (key == 5 || key == 6) {
-        g_Page[id][g_Section[id]] += key == 5 ? -1 : 1;
+    else if (key == 6 || key == 7) {
+        g_Page[id][g_Section[id]] += key == 6 ? -1 : 1;
         ShowList(id);
-    } else if (key == 7) {
-        ShowRoot(id);
-    } else if (key == 8) ShowHelp(id);
+    } else if (key == 8) {
+        if (g_Section[id] >= GROUP_DAMAGE) ShowAdmin(id);
+        else ShowRoot(id);
+    }
     return PLUGIN_HANDLED;
 }
 
@@ -386,13 +412,16 @@ public client_disconnected(id) {
     CloseTargetMenu(id);
     g_TargetUserId[id] = 0;
     g_TargetEntry[id] = -1;
-    g_HelpOpen[id] = false;
 }
 
 ShowTargets(id, entry) {
     if (!Available(id, entry)) { ShowList(id); return; }
     CloseTargetMenu(id);
-    new menu = menu_create("\yВыберите игрока", "OnTarget"), name[32], data[24], count;
+    new heading[160];
+    if (g_Entries[entry][Action] == ACTION_VOTE)
+        copy(heading, charsmax(heading), "\yГолосование: ограничение урона^n\wВыберите игрока");
+    else formatex(heading, charsmax(heading), "\y%s^n\wВыберите игрока", g_Entries[entry][Title]);
+    new menu = menu_create(heading, "OnTarget"), name[32], data[24], count;
     g_TargetMenu[id] = menu;
     g_TargetEntry[id] = entry;
     for (new target = 1; target <= MaxClients; target++) {
@@ -471,9 +500,16 @@ public OnDamage(id, menu, item) {
     return PLUGIN_HANDLED;
 }
 
-// Append one complete HTML entity or UTF-8 character at a time. Page boundaries
-// cannot break either. Only the requested page is retained; all text is counted.
-MotdText(const text[], wanted, &page, &used, output[], capacity) {
+// Unlike the former guide, this is one self-contained HTML document. Links are
+// fragment navigation only, never client/server command URLs. Files do not bypass
+// GoldSrc's 1536-byte MOTD limit; refuse overflow rather than cut markup or rules.
+bool:HtmlAdd(output[], capacity, const fragment[]) {
+    if (strlen(output) + strlen(fragment) > capacity) return false;
+    add(output, capacity, fragment);
+    return true;
+}
+
+bool:HtmlText(output[], capacity, const text[]) {
     new token[8], bytes;
     for (new i; text[i]; i += bytes) {
         bytes = 1;
@@ -491,53 +527,68 @@ MotdText(const text[], wanted, &page, &used, output[], capacity) {
                 copy(token, bytes, text[i]);
             }
         }
-        new length = strlen(token);
-        if (used + length > MOTD_BODY_BYTES) { page++; used = 0; }
-        if (page == wanted) add(output, capacity, token);
-        used += length;
+        if (!HtmlAdd(output, capacity, token)) return false;
     }
+    return true;
 }
 
-BuildMotd(const entries[], count, wanted, output[], capacity) {
-    copy(output, capacity, MOTD_HEAD);
-    new page, used;
-    for (new i; i < count; i++) {
-        MotdText(g_Entries[entries[i]][Title], wanted, page, used, output, capacity);
-        MotdText("^n", wanted, page, used, output, capacity);
-        MotdText(g_Entries[entries[i]][Description], wanted, page, used, output, capacity);
-        MotdText("^n^n", wanted, page, used, output, capacity);
+bool:HasCommand(id, const command[]) {
+    for (new entry; entry < g_Count; entry++) {
+        if (equal(g_Entries[entry][Command], command) && Available(id, entry)) return true;
     }
-    add(output, capacity, MOTD_END);
-    return page + 1;
+    return false;
 }
 
-ShowHelp(id, requested = 0, bool:rulesOnly = false) {
-    new entries[MAX_ENTRIES], count, motd[MOTD_BYTES + 1];
-    // Evaluate availability once per open; never leak admin prose to other players.
-    for (new i; i < g_Count; i++) {
-        if ((!rulesOnly || g_Entries[i][Section] == 2) && Available(id, i)) entries[count++] = i;
+bool:BuildMotd(id, output[], capacity) {
+    new bool:bots = HasGroup(id, GROUP_BOTS), bool:votes = HasGroup(id, GROUP_VOTES);
+    new bool:stats = HasCommand(id, "say /stats"), bool:voice = HasGroup(id, GROUP_VOICE);
+    new bool:admin = HasAdminActions(id), bool:rules;
+    for (new i; i < g_Count; i++) if (g_Entries[i][Section] == 2) rules = true;
+    output[0] = EOS;
+    if (!HtmlAdd(output, capacity, MOTD_HEAD) || !HtmlAdd(output, capacity, "<p>")) return false;
+    if (bots && !HtmlAdd(output, capacity, "<a href=#b>Боты</a> ")) return false;
+    if (votes && !HtmlAdd(output, capacity, "<a href=#v>Голосования</a> ")) return false;
+    if ((stats || voice) && !HtmlAdd(output, capacity, "<a href=#p>Личное</a> ")) return false;
+    if (admin && !HtmlAdd(output, capacity, MOTD_NAV_ADMIN)) return false;
+    if (rules && !HtmlAdd(output, capacity, " <a href=#r>Правила</a>")) return false;
+    if (!HtmlAdd(output, capacity, "</p>")) return false;
+    if (bots && !HtmlAdd(output, capacity, MOTD_BOTS)) return false;
+    if (votes) {
+        if (!HtmlAdd(output, capacity, MOTD_VOTES)) return false;
+        if (HasCommand(id, "say /rtv") && !HtmlAdd(output, capacity, MOTD_MAP)) return false;
+        if (HasCommand(id, "say /mode") && !HtmlAdd(output, capacity, MOTD_MODE)) return false;
+        if (HasCommand(id, "uhc_blockdmg_vote") && !HtmlAdd(output, capacity, MOTD_DAMAGE)) return false;
     }
-    requested = max(0, requested);
-    new pages = BuildMotd(entries, count, requested, motd, charsmax(motd));
-    if (requested >= pages) {
-        requested = pages - 1;
-        BuildMotd(entries, count, requested, motd, charsmax(motd));
+    if (stats || voice) {
+        if (!HtmlAdd(output, capacity, MOTD_PERSONAL)) return false;
+        if (stats && !HtmlAdd(output, capacity, MOTD_STATS)) return false;
+        if (voice && !HtmlAdd(output, capacity, MOTD_MUTE)) return false;
     }
-    g_HelpOpen[id] = true;
-    g_RulesOnly[id] = rulesOnly;
-    g_HelpPage[id] = requested;
-    new menu[512], keys = MENU_KEY_8 | MENU_KEY_0, header[96];
-    formatex(header, charsmax(header), "Пикабу: %s (%d/%d)", rulesOnly ? "правила" : "справка", requested + 1, pages);
-    new len = formatex(menu, charsmax(menu), "\y%s\w^n^nПосле закрытия окна:^n", header);
-    if (requested > 0) {
-        len += formatex(menu[len], charsmax(menu) - len, "6. Предыдущая страница^n");
-        keys |= MENU_KEY_6;
+    if (admin && !HtmlAdd(output, capacity, MOTD_ADMIN)) return false;
+    if (rules) {
+        if (!HtmlAdd(output, capacity, "<h2><a name=r></a>Правила</h2>")) return false;
+        for (new i; i < g_Count; i++) {
+            if (g_Entries[i][Section] != 2) continue;
+            if (!HtmlText(output, capacity, g_Entries[i][Description]) || !HtmlAdd(output, capacity, "<br>")) return false;
+        }
     }
-    if (requested + 1 < pages) {
-        len += formatex(menu[len], charsmax(menu) - len, "7. Следующая страница^n");
-        keys |= MENU_KEY_7;
+    return HtmlAdd(output, capacity, MOTD_END);
+}
+
+ShowHelp(id) {
+    CloseTargetMenu(id);
+    // Cancel a currently open provider menu as well; its handle belongs to that
+    // provider and must NOT be destroyed here. No menu is scheduled on MOTD close.
+    new oldMenu, newMenu;
+    get_user_menu(id, oldMenu, newMenu);
+    if (newMenu >= 0) menu_cancel(id);
+    show_menu(id, 0, "");
+    g_Section[id] = -1;
+    new motd[MOTD_BYTES + 1];
+    if (!BuildMotd(id, motd, charsmax(motd))) {
+        log_amx("Help exceeds %d UTF-8 bytes; shorten configured rules. No partial rules shown.", MOTD_BYTES);
+        show_motd(id, "Справка не поместилась в MOTD. Сообщите администрации: нужно сократить текст правил.", "Пикабу");
+        return;
     }
-    formatex(menu[len], charsmax(menu) - len, "8. Меню !pika^n0. Закрыть");
-    show_menu(id, keys, menu, -1, MENU_NAME);
-    show_motd(id, motd, header);
+    show_motd(id, motd, "Пикабу — справка");
 }
